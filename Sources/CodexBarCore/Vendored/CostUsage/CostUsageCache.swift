@@ -123,6 +123,7 @@ struct CostUsageCache: Codable {
     var codexProjectMetadataVersion: Int?
     var codexPriorityTurnKeys: [String: String]?
     var codexPriorityTurnIDsByDay: [String: [String]]?
+    var codexHistoryCoverageIsEstablished: Bool?
 
     /// filePath -> file usage
     var files: [String: CostUsageFileUsage] = [:]

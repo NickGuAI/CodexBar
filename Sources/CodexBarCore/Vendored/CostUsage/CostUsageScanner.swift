@@ -962,6 +962,11 @@ enum CostUsageScanner {
         let parsedBytes: Int64
     }
 
+    struct DailyReportLoadResult {
+        let report: CostUsageDailyReport
+        let historyCoverageIsEstablished: Bool
+    }
+
     enum ClaudePathRole: String, Codable {
         case parent
         case subagent
@@ -1010,6 +1015,23 @@ enum CostUsageScanner {
         options: Options = Options(),
         checkCancellation: CancellationCheck?) throws -> CostUsageDailyReport
     {
+        try self.loadDailyReportResultCancellable(
+            provider: provider,
+            since: since,
+            until: until,
+            now: now,
+            options: options,
+            checkCancellation: checkCancellation).report
+    }
+
+    static func loadDailyReportResultCancellable(
+        provider: UsageProvider,
+        since: Date,
+        until: Date,
+        now: Date = Date(),
+        options: Options = Options(),
+        checkCancellation: CancellationCheck?) throws -> DailyReportLoadResult
+    {
         let range = CostUsageDayRange(since: since, until: until, calendar: options.calendar)
         let emptyReport = CostUsageDailyReport(data: [], summary: nil)
         try checkCancellation?()
@@ -1022,23 +1044,27 @@ enum CostUsageScanner {
                 options: options,
                 checkCancellation: checkCancellation)
         case .claude:
-            return try self.loadClaudeDaily(
-                provider: .claude,
-                range: range,
-                now: now,
-                options: options,
-                checkCancellation: checkCancellation)
+            return try DailyReportLoadResult(
+                report: self.loadClaudeDaily(
+                    provider: .claude,
+                    range: range,
+                    now: now,
+                    options: options,
+                    checkCancellation: checkCancellation),
+                historyCoverageIsEstablished: true)
         case .vertexai:
             var filtered = options
             if filtered.claudeLogProviderFilter == .all {
                 filtered.claudeLogProviderFilter = .vertexAIOnly
             }
-            return try self.loadClaudeDaily(
-                provider: .vertexai,
-                range: range,
-                now: now,
-                options: filtered,
-                checkCancellation: checkCancellation)
+            return try DailyReportLoadResult(
+                report: self.loadClaudeDaily(
+                    provider: .vertexai,
+                    range: range,
+                    now: now,
+                    options: filtered,
+                    checkCancellation: checkCancellation),
+                historyCoverageIsEstablished: true)
         case .openai, .azureopenai, .clinepass, .zai, .gemini, .antigravity, .cursor, .opencode, .opencodego, .alibaba,
              .alibabatokenplan, .qwencloud, .factory,
              .copilot, .devin, .minimax, .manus, .kilo, .kiro, .kimi, .moonshot, .augment, .jetbrains, .amp,
@@ -1046,7 +1072,7 @@ enum CostUsageScanner {
              .abacus, .mistral, .deepseek, .deepinfra, .codebuff, .crof, .windsurf, .zed, .venice, .commandcode,
              .qoder, .stepfun, .bedrock, .grok, .groq, .llmproxy, .litellm, .deepgram, .poe, .chutes, .neuralwatt,
              .clawrouter, .longcat, .sub2api, .wayfinder, .zenmux, .aiand, .zoommate, .xai:
-            return emptyReport
+            return DailyReportLoadResult(report: emptyReport, historyCoverageIsEstablished: true)
         }
     }
 
@@ -3390,7 +3416,7 @@ enum CostUsageScanner {
         range: CostUsageDayRange,
         now: Date,
         options: Options,
-        checkCancellation: CancellationCheck?) throws -> CostUsageDailyReport
+        checkCancellation: CancellationCheck?) throws -> DailyReportLoadResult
     {
         var cache = Self.loadCodexCache(options: options, range: range)
         let nowMs = Int64(now.timeIntervalSince1970 * 1000)
@@ -3531,8 +3557,22 @@ enum CostUsageScanner {
                 }
             }
 
-            let shouldRetainWiderWindow = !options.forceRescan && !plan.pricingChanged && !plan
-                .priorityMetadataChanged && !plan.needsTurnIDCacheMigration && !plan.needsProjectMetadataMigration
+            let historyCoverageIsEstablished =
+                scanBudget.resumedPartialFileCount == 0
+                    && scanBudget.deferredByBudgetFileCount == 0
+                    && !cache.files.values.contains {
+                        $0.codexScanComplete == false
+                            && $0.touchesCodexScanWindow(
+                                sinceKey: range.scanSinceKey,
+                                untilKey: range.scanUntilKey)
+                    }
+            let shouldRetainWiderWindow = !options.forceRescan
+                && !plan.pricingChanged
+                && !plan.priorityMetadataChanged
+                && !plan.needsTurnIDCacheMigration
+                && !plan.needsProjectMetadataMigration
+                && cache.codexHistoryCoverageIsEstablished == true
+                && historyCoverageIsEstablished
             let retainedSinceKey = shouldRetainWiderWindow
                 ? [cachedSinceKey, range.scanSinceKey].compactMap(\.self).min() ?? range.scanSinceKey
                 : range.scanSinceKey
@@ -3546,6 +3586,7 @@ enum CostUsageScanner {
             cache.codexPricingKey = plan.codexPricingKey
             cache.codexPriorityMetadataKey = plan.codexPriorityMetadataKey
             cache.codexProjectMetadataVersion = Self.codexProjectMetadataVersion
+            cache.codexHistoryCoverageIsEstablished = historyCoverageIsEstablished
             if plan.hasPriorityMetadata {
                 cache.codexPriorityTurnKeys = Self.mergePriorityTurnKeys(
                     existing: shouldRetainWiderWindow ? cache.codexPriorityTurnKeys : nil,
@@ -3565,12 +3606,14 @@ enum CostUsageScanner {
             Self.saveCodexCache(cache, options: options, range: range)
         }
 
-        return Self.buildCodexReportFromCache(
-            cache: cache,
-            range: range,
-            modelsDevCatalog: plan.modelsDevCatalog,
-            modelsDevCacheRoot: options.cacheRoot,
-            priorityTurns: plan.priorityTurns)
+        return DailyReportLoadResult(
+            report: Self.buildCodexReportFromCache(
+                cache: cache,
+                range: range,
+                modelsDevCatalog: plan.modelsDevCatalog,
+                modelsDevCacheRoot: options.cacheRoot,
+                priorityTurns: plan.priorityTurns),
+            historyCoverageIsEstablished: cache.codexHistoryCoverageIsEstablished == true)
     }
 
     private static func codexFileScanContext(

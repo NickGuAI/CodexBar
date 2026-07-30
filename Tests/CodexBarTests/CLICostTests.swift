@@ -164,6 +164,7 @@ struct CLICostTests {
             sessionCostUSD: 0.01,
             last30DaysTokens: 40,
             last30DaysCostUSD: 0.04,
+            historyCoverageIsEstablished: false,
             daily: [
                 CostUsageDailyReport.Entry(
                     date: "2026-04-02",
@@ -232,6 +233,7 @@ struct CLICostTests {
         }
 
         #expect(json.contains("\"projects\""))
+        #expect(json.contains("\"historyCoverageIsEstablished\":false"))
         #expect(json.contains("\"sources\""))
         #expect(json.contains("\"name\":\"client-a\""))
         #expect(json.contains("/work/client-a") || json.contains("\\/work\\/client-a"))

@@ -210,6 +210,7 @@ public struct CostUsageFetcher: Sendable {
         return options
     }
 
+    // swiftlint:disable:next function_body_length
     static func loadTokenSnapshot(
         provider: UsageProvider,
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -288,13 +289,14 @@ public struct CostUsageFetcher: Sendable {
         // scanner-level checks.
         let scanOptions = options
         let scanResult = try await CostUsageScanExecutor.run { checkCancellation in
-            var daily = try CostUsageScanner.loadDailyReportCancellable(
+            var dailyResult = try CostUsageScanner.loadDailyReportResultCancellable(
                 provider: provider,
                 since: since,
                 until: now,
                 now: now,
                 options: scanOptions,
                 checkCancellation: checkCancellation)
+            var daily = dailyResult.report
             try checkCancellation()
 
             if provider == .vertexai,
@@ -304,13 +306,14 @@ public struct CostUsageFetcher: Sendable {
             {
                 var fallback = scanOptions
                 fallback.claudeLogProviderFilter = .all
-                daily = try CostUsageScanner.loadDailyReportCancellable(
+                dailyResult = try CostUsageScanner.loadDailyReportResultCancellable(
                     provider: provider,
                     since: since,
                     until: now,
                     now: now,
                     options: fallback,
                     checkCancellation: checkCancellation)
+                daily = dailyResult.report
                 try checkCancellation()
             }
 
@@ -355,7 +358,11 @@ public struct CostUsageFetcher: Sendable {
                     sessions = []
                 }
             }
-            return (daily: daily, projects: projects, sessions: sessions)
+            return (
+                daily: daily,
+                projects: projects,
+                sessions: sessions,
+                historyCoverageIsEstablished: dailyResult.historyCoverageIsEstablished)
         }
 
         if allowPricingRefresh,
@@ -391,6 +398,7 @@ public struct CostUsageFetcher: Sendable {
             now: now,
             historyDays: clampedHistoryDays,
             calendar: scanOptions.calendar,
+            historyCoverageIsEstablished: scanResult.historyCoverageIsEstablished,
             projects: scanResult.projects,
             sessions: scanResult.sessions)
     }
@@ -597,6 +605,7 @@ public struct CostUsageFetcher: Sendable {
                     now: now,
                     historyDays: clampedHistoryDays,
                     calendar: options.calendar,
+                    historyCoverageIsEstablished: cache.codexHistoryCoverageIsEstablished == true,
                     projects: Self.mergedProjectBreakdowns(projects),
                     sessions: sessions,
                     updatedAt: scanTimes.min()),
@@ -750,6 +759,7 @@ public struct CostUsageFetcher: Sendable {
         historyDays: Int = 30,
         useCurrentLocalDayForSession: Bool = true,
         calendar: Calendar = .current,
+        historyCoverageIsEstablished: Bool = true,
         meteredCostUSD: Double? = nil,
         credentialScopeFingerprint: String? = nil,
         historyLabel: String? = nil,
@@ -789,6 +799,7 @@ public struct CostUsageFetcher: Sendable {
             last30DaysTokens: last30DaysTokens,
             last30DaysCostUSD: last30DaysCostUSD,
             historyDays: historyDays,
+            historyCoverageIsEstablished: historyCoverageIsEstablished,
             historyLabel: historyLabel,
             meteredCostUSD: meteredCostUSD,
             credentialScopeFingerprint: credentialScopeFingerprint,

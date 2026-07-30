@@ -319,14 +319,18 @@ struct CostUsagePerformanceGateTests {
         options.refreshMinIntervalSeconds = 0
 
         var offsets: [Int64] = []
+        var coverage: [Bool] = []
         var report: CostUsageDailyReport?
         for _ in 0..<12 {
-            report = CostUsageScanner.loadDailyReport(
+            let result = try CostUsageScanner.loadDailyReportResultCancellable(
                 provider: .codex,
                 since: day,
                 until: day,
                 now: day,
-                options: options)
+                options: options,
+                checkCancellation: nil)
+            report = result.report
+            coverage.append(result.historyCoverageIsEstablished)
             let cached = try #require(CostUsageCacheIO.load(
                 provider: .codex,
                 cacheRoot: env.cacheRoot).files.values.first)
@@ -337,6 +341,8 @@ struct CostUsagePerformanceGateTests {
         }
 
         #expect(offsets.count > 1)
+        #expect(coverage.first == false)
+        #expect(coverage.last == true)
         #expect(zip(offsets, offsets.dropFirst()).allSatisfy { $0 <= $1 })
         #expect(offsets.last == metadata.size)
         #expect(report?.summary?.totalTokens == baseline.summary?.totalTokens)
@@ -561,15 +567,18 @@ struct CostUsagePerformanceGateTests {
             preferNewestCodexSessionsFirst: true)
         options.refreshMinIntervalSeconds = 0
 
-        _ = CostUsageScanner.loadDailyReport(
+        let result = try CostUsageScanner.loadDailyReportResultCancellable(
             provider: .codex,
             since: day,
             until: day,
             now: day,
-            options: options)
+            options: options,
+            checkCancellation: nil)
         let cache = CostUsageCacheIO.load(provider: .codex, cacheRoot: env.cacheRoot)
         let cachedNames = Set(cache.files.keys.map { URL(fileURLWithPath: $0).lastPathComponent })
 
+        #expect(!result.historyCoverageIsEstablished)
+        #expect(cache.codexHistoryCoverageIsEstablished == false)
         #expect(cachedNames.contains(newer.lastPathComponent))
         #expect(!cachedNames.contains(older.lastPathComponent))
     }
