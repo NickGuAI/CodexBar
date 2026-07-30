@@ -384,6 +384,7 @@ struct CostUsageFetcherCacheSnapshotTests {
 
         #expect(cached?.sessionTokens == 165)
         #expect(cached?.last30DaysTokens == 165)
+        #expect(cached?.historyCoverageIsEstablished == false)
     }
 
     @Test
@@ -426,6 +427,7 @@ struct CostUsageFetcherCacheSnapshotTests {
 
         #expect(cached?.sessionTokens == 165)
         #expect(cached?.last30DaysTokens == 165)
+        #expect(cached?.historyCoverageIsEstablished == false)
     }
 
     private static func writeCodexSessionFile(

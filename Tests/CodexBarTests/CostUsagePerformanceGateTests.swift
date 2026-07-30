@@ -350,6 +350,118 @@ struct CostUsagePerformanceGateTests {
     }
 
     @Test
+    func `unfinished recent lookback remains incomplete until resumed`() throws {
+        let env = try CostUsageTestEnvironment()
+        defer { env.cleanup() }
+        let requestedDay = try env.makeLocalNoon(year: 2026, month: 5, day: 10)
+        let partitionDay = try env.makeLocalNoon(year: 2026, month: 4, day: 1)
+        let model = "openai/gpt-5.2-codex"
+        let fileURL = try env.writeCodexSessionFile(
+            day: partitionDay,
+            filename: "recent-lookback.jsonl",
+            contents: env.jsonl([
+                [
+                    "type": "session_meta",
+                    "timestamp": env.isoString(for: partitionDay),
+                    "payload": ["session_id": "recent-lookback"],
+                ],
+                [
+                    "type": "turn_context",
+                    "timestamp": env.isoString(for: partitionDay),
+                    "payload": ["model": model],
+                ],
+                [
+                    "type": "event_msg",
+                    "timestamp": env.isoString(for: partitionDay),
+                    "payload": [
+                        "type": "token_count",
+                        "padding": String(repeating: "x", count: 4096),
+                        "info": [
+                            "last_token_usage": [
+                                "input_tokens": 10,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 0,
+                            ],
+                            "model": model,
+                        ],
+                    ],
+                ],
+                [
+                    "type": "event_msg",
+                    "timestamp": env.isoString(for: requestedDay),
+                    "payload": [
+                        "type": "token_count",
+                        "info": [
+                            "last_token_usage": [
+                                "input_tokens": 42,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 0,
+                            ],
+                            "model": model,
+                        ],
+                    ],
+                ],
+            ]))
+        try FileManager.default.setAttributes(
+            [.modificationDate: requestedDay],
+            ofItemAtPath: fileURL.path)
+        let metadata = CostUsageScanner.codexFileMetadata(fileURL: fileURL)
+        let slice = max(1, metadata.size / 4)
+        var options = CostUsageScanner.Options(
+            codexSessionsRoot: env.codexSessionsRoot,
+            claudeProjectsRoots: nil,
+            cacheRoot: env.cacheRoot,
+            codexTraceDatabaseURL: env.root.appendingPathComponent("missing.sqlite"),
+            maxCodexSessionFileBytes: slice,
+            maxCodexScanBytesPerRefresh: slice)
+        options.refreshMinIntervalSeconds = 0
+
+        let first = try CostUsageScanner.loadDailyReportResultCancellable(
+            provider: .codex,
+            since: requestedDay,
+            until: requestedDay,
+            now: requestedDay,
+            options: options,
+            checkCancellation: nil)
+        let firstCached = try #require(CostUsageCacheIO.load(
+            provider: .codex,
+            cacheRoot: env.cacheRoot).files[fileURL.path])
+        let firstOffset = try #require(firstCached.parsedBytes)
+
+        #expect(!first.historyCoverageIsEstablished)
+        #expect(firstCached.codexScanComplete == false)
+        #expect(firstCached.days["2026-05-10"] == nil)
+
+        let second = try CostUsageScanner.loadDailyReportResultCancellable(
+            provider: .codex,
+            since: requestedDay,
+            until: requestedDay,
+            now: requestedDay,
+            options: options,
+            checkCancellation: nil)
+        let secondCached = try #require(CostUsageCacheIO.load(
+            provider: .codex,
+            cacheRoot: env.cacheRoot).files[fileURL.path])
+
+        #expect(!second.historyCoverageIsEstablished)
+        #expect((secondCached.parsedBytes ?? 0) > firstOffset)
+
+        var final = second
+        for _ in 0..<8 where !final.historyCoverageIsEstablished {
+            final = try CostUsageScanner.loadDailyReportResultCancellable(
+                provider: .codex,
+                since: requestedDay,
+                until: requestedDay,
+                now: requestedDay,
+                options: options,
+                checkCancellation: nil)
+        }
+
+        #expect(final.historyCoverageIsEstablished)
+        #expect(final.report.summary?.totalTokens == 42)
+    }
+
+    @Test
     func `oversized codex progress survives cache round trip`() throws {
         let env = try CostUsageTestEnvironment()
         defer { env.cleanup() }

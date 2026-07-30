@@ -543,11 +543,12 @@ public struct CostUsageFetcher: Sendable {
             var scanTimes: [Date] = []
             var piMerged = false
 
-            if cache.timeZoneIdentifier == range.calendar.timeZone.identifier,
-               !cache.days.isEmpty,
-               cache.roots == CostUsageScanner.codexRootsFingerprint(options: options),
-               !CostUsageScanner.requestedWindowExpandsCache(range: range, cache: cache)
-            {
+            let nativeCacheIsValid =
+                cache.timeZoneIdentifier == range.calendar.timeZone.identifier
+                    && !cache.days.isEmpty
+                    && cache.roots == CostUsageScanner.codexRootsFingerprint(options: options)
+                    && !CostUsageScanner.requestedWindowExpandsCache(range: range, cache: cache)
+            if nativeCacheIsValid {
                 let daily = CostUsageScanner.buildCodexReportFromCache(
                     cache: cache,
                     range: range,
@@ -605,7 +606,8 @@ public struct CostUsageFetcher: Sendable {
                     now: now,
                     historyDays: clampedHistoryDays,
                     calendar: options.calendar,
-                    historyCoverageIsEstablished: cache.codexHistoryCoverageIsEstablished == true,
+                    historyCoverageIsEstablished: nativeCacheIsValid
+                        && cache.codexHistoryCoverageIsEstablished == true,
                     projects: Self.mergedProjectBreakdowns(projects),
                     sessions: sessions,
                     updatedAt: scanTimes.min()),

@@ -3430,7 +3430,9 @@ enum CostUsageScanner {
 
             let cachedSinceKey = cache.scanSinceKey
             let cachedUntilKey = cache.scanUntilKey
-            let shouldRunColdCacheLookback = cache.files.isEmpty || plan.rootsChanged
+            let shouldRunColdCacheLookback = cache.files.isEmpty
+                || plan.rootsChanged
+                || cache.codexHistoryCoverageIsEstablished != true
             let coldCacheLookbackStart = Self.localStartOfDay(range.scanSinceKey, calendar: options.calendar)
             var seenPaths: Set<String> = []
             var files: [URL] = []
@@ -3560,11 +3562,8 @@ enum CostUsageScanner {
             let historyCoverageIsEstablished =
                 scanBudget.resumedPartialFileCount == 0
                     && scanBudget.deferredByBudgetFileCount == 0
-                    && !cache.files.values.contains {
-                        $0.codexScanComplete == false
-                            && $0.touchesCodexScanWindow(
-                                sinceKey: range.scanSinceKey,
-                                untilKey: range.scanUntilKey)
+                    && !filePathsInScan.contains {
+                        cache.files[$0]?.codexScanComplete == false
                     }
             let shouldRetainWiderWindow = !options.forceRescan
                 && !plan.pricingChanged
